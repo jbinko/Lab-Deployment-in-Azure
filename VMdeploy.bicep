@@ -16,6 +16,14 @@ param HyperVHostName string = 'updateme'
 ])
 param vnetNewOrExisting string
 
+@description('Option to enable spot pricing for VM')
+param enableAzureSpotPricing bool = false
+
+param autoShutdownEnabled bool = false
+param autoShutdownTime string = '1800' // The time for auto-shutdown in HHmm format (24-hour clock)
+param autoShutdownTimezone string = 'UTC' // Timezone for the auto-shutdown
+param autoShutdownEmailRecipient string = ''
+
 var OnPremVNETName = 'OnPremVNET'
 var OnPremVNETPrefix = '10.0.0.0/16'
 var OnPremVNETSubnet1Name = 'VMHOST'
@@ -367,10 +375,36 @@ resource HyperVHost 'Microsoft.Compute/virtualMachines@2022-11-01' = {
         }
       ]
     }
+    priority: enableAzureSpotPricing ? 'Spot' : 'Regular'
+    evictionPolicy: enableAzureSpotPricing ? 'Deallocate' : null
+    billingProfile: enableAzureSpotPricing ? {
+      maxPrice: -1
+    } : null
   }
   dependsOn: [
     OnPremVNET
   ]
+}
+
+resource autoShutdown 'Microsoft.DevTestLab/schedules@2018-09-15' = if (autoShutdownEnabled) {
+  name: 'shutdown-computevm-${HyperVHost.name}'
+  location: location
+  properties: {
+    status: 'Enabled'
+    taskType: 'ComputeVmShutdownTask'
+    dailyRecurrence: {
+      time: autoShutdownTime
+    }
+    timeZoneId: autoShutdownTimezone
+    notificationSettings: {
+      status: empty(autoShutdownEmailRecipient) ? 'Disabled' : 'Enabled' // Set status based on whether an email is provided
+      timeInMinutes: 30
+      webhookUrl: ''
+      emailRecipient: autoShutdownEmailRecipient
+      notificationLocale: 'en'
+    }
+    targetResourceId: HyperVHost.id
+  }
 }
 
 resource HyperVHostName_InstallHyperV 'Microsoft.Compute/virtualMachines/extensions@2022-11-01' = {
@@ -421,4 +455,3 @@ resource HyperVHostName_HyperVHostConfig 'Microsoft.Compute/virtualMachines/exte
     HyperVHostName_InstallHyperV
   ]
 }
-
